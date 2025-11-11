@@ -1,0 +1,170 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+jupyter_notebook_config.py
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+test-results/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Data files (uncomment if you don't want to commit large data files)
+# *.parquet
+# *.csv
+# *.json
+# *.pkl
+# *.pickle
+# data_analyst/data/*.parquet
+
+# Phoenix/Observability
+phoenix/
+.phoenix/
+phoenix.db
+traces/
+spans/
+
+# OpenTelemetry
+otel/
+.otel/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+site/
+
+# Distribution / packaging
+.Python
+build/
+*.egg-info/
+dist/
+CLAUDE.md
+
+# Cache
+.cache/
+*.cache
+
+# Output files
+output/
+outputs/
+results/
+
+# Secrets and credentials
+secrets/
+credentials.json
+*.pem
+*.key
+*.crt
+
+# Models and checkpoints (if storing locally)
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.pkl
+
+# Evaluation results
+evaluations/
+eval_results/
