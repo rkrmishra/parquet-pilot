@@ -2753,7 +2753,11 @@ sequenceDiagram
     Dev->>Phoenix: Test spans
 ```
 
-#### Example: Add Weather Data Tool
+#### Example: Add Weather Data Tool (Extension Example - Not Included in Repo)
+
+> Note: The following `get_weather_data` example is a demonstration of how
+> to extend the agent with a custom tool. It is not included as part of this
+> repository and is intended as a guide for contributors.
 
 **Step 1: Define the Tool Function**
 
@@ -3230,6 +3234,11 @@ def smart_lookup(query: str, use_cache: bool = True) -> str:
 
 ### Testing Extensions
 
+> Note: Some examples in this section reference 'example extension' code
+> (e.g., `get_weather_data`) which are demonstration snippets and not
+> included in the repository. Replace with your own extension code for
+> unit/integration tests.
+
 ```mermaid
 graph TD
     A[Tests] --> B[Unit]
@@ -3241,27 +3250,26 @@ graph TD
 ```python
 # test_extensions.py
 import pytest
-from utils import get_weather_data, run_agent
+from agent_core import lookup_sales_data, start_main_span
 
-def test_weather_tool_basic():
-    """Test weather tool returns expected format"""
-    result = get_weather_data("New York", "2024-01-01 to 2024-01-31")
-    assert "Weather data" in result
-    assert "Avg Temp" in result
-    assert "New York" in result
+def test_lookup_basic():
+    """Basic smoke test for the lookup tool using the default dataset"""
+    result = lookup_sales_data("What was the total revenue across all stores?")
+    assert isinstance(result, str)
+    assert len(result) > 0
 
-def test_weather_tool_integration():
-    """Test weather tool works through agent"""
+def test_agent_query_roundtrip():
+    """Smoke test for the agent end-to-end via `start_main_span`"""
     messages = [{
         "role": "user",
-        "content": "What was the weather in Boston last January?"
+        "content": "What was the total revenue across all stores?"
     }]
-    response = run_agent(messages)
-    assert response is not None
+    response = start_main_span(messages)
+    assert isinstance(response, str)
     assert len(response) > 0
 
-def test_weather_tool_observability():
-    """Test weather tool creates proper spans"""
+def test_lookup_observability():
+    """Test lookup tool creates proper spans in the current tracer provider"""
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -3651,6 +3659,4 @@ flowchart LR
 ```
 
 ---
-
-Diagrams have been added. For additional diagrams (for example, a sequence that includes retries and exponential backoff on API failures, or a diagram showing instrumentation points for custom metrics), specify which ones to include.
 

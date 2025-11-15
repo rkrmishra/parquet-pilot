@@ -1,4 +1,12 @@
-# Building your Agent 
+"""
+main.py
+-----------------
+High-level evaluation script used to exercise the agent end-to-end.
+This script runs a small set of test questions, records traces to Phoenix,
+and executes several LLM-based evaluation passes (tool-calling, SQL
+generation, code runnability, and clarity). It is intended for offline
+evaluations and automated checks.
+"""
 
 # The agent is comprised of a router using OpenAI function calling, 
 # and a set of three tools: a database lookup tool, a data analysis 
@@ -36,9 +44,11 @@ import nest_asyncio
 nest_asyncio.apply()
 
 from helper import get_openai_api_key
+# Load OpenAI API key from environment using helper. This keeps secrets out of
+# the repo and allows local .env usage for development.
 os.environ["OPENAI_API_KEY"] = get_openai_api_key()
 
-PROJECT_NAME = "evaluating-agent"
+PROJECT_NAME = "evaluating-agent"  # Phoenix project name used for traces and evals
 
 #from utils import run_agent, start_main_span, tools, get_phoenix_endpoint
 from utils import run_agent, start_main_span, tools
@@ -53,6 +63,8 @@ agent_questions = [
 ]
 
 for question in tqdm(agent_questions, desc="Processing questions"):
+    # Execute the agent for each predefined question and emit traces for
+    # later evaluation. Errors are printed but do not halt the loop.
     try:
         ret = start_main_span([{"role": "user", "content": question}])
     except Exception as e:
@@ -78,7 +90,8 @@ query = SpanQuery().where(
     tool_call="llm.tools"
 )
 
-# The Phoenix Client can take this query and return the dataframe.
+# The Phoenix Client can execute this query and return a pandas dataframe of
+# matching spans. We then drop rows without tool calls before evaluating.
 tool_calls_df = px.Client().query_spans(query, 
                                         project_name=PROJECT_NAME, 
                                         timeout=None)
@@ -86,6 +99,8 @@ tool_calls_df = tool_calls_df.dropna(subset=["tool_call"])
 
 #tool_calls_df.head()
 
+# Suppress tracing for evaluation queries so the evaluation runs do not get
+# recorded as additional spans in Phoenix which would pollute results.
 with suppress_tracing():
     tool_call_eval = llm_classify(
         dataframe = tool_calls_df,
@@ -118,7 +133,12 @@ code_gen_df = px.Client().query_spans(query,
 code_gen_df.head()
 
 def code_is_runnable(output: str) -> bool:
-    """Check if the code is runnable"""
+    """Attempt to exec the produced code and return True if it runs.
+
+    Note: running arbitrary code may produce side effects or require imports.
+    This evaluation is intentionally simple; in production you may want to
+    sandbox execution or use static checks instead.
+    """
     output = output.strip()
     output = output.replace("```python", "").replace("```", "")
     try:

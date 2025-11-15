@@ -1,6 +1,14 @@
 """
-Parquet Pilot - Streamlit Frontend
-An interactive web interface for the LLM-powered data analyst agent
+streamlit_app.py
+-----------------
+Streamlit frontend that provides an interactive chat UI for the agent.
+Users can query a default Parquet dataset or upload their own file, view a
+preview of the data, and ask questions that the agent answers using the
+instrumented tools in `agent_core.py`.
+
+This file integrates guardrails, UI components, and a simple pattern for
+executing visualizations (the code produced by the LLM is executed using
+`exec()` and should be treated carefully).
 """
 
 import streamlit as st
@@ -20,6 +28,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Guardrails - Question validation
+# These functions define a two-tier validation approach to keep questions
+# within the dataset scope and prevent abuse or out-of-scope queries.
 def validate_question(question: str) -> tuple[bool, str]:
     """
     Validate if the question is within scope using LLM-based guardrails.
@@ -88,13 +98,17 @@ Examples:
             return True, ""
 
     except Exception as e:
-        # On error, allow the question but log it
+        # On error, we default to allowing the question so the user isn't
+        # blocked by validation outages; errors are logged to the console
+        # and traced in Phoenix.
         print(f"Validation error: {e}")
         return True, ""
 
 # Additional keyword-based guardrails (fast pre-check)
 def quick_validation(question: str) -> tuple[bool, str]:
-    """Quick keyword-based validation before LLM check"""
+    """Fast client-side checks to block obviously harmful or out-of-scope
+    requests before incurring LLM latency.
+    """
     question_lower = question.lower()
 
     # Block obvious out-of-scope patterns
@@ -118,6 +132,9 @@ def quick_validation(question: str) -> tuple[bool, str]:
     return True, ""
 
 # Custom lookup function that uses uploaded file if available
+# This function is used by the Streamlit UI to prioritize user-uploaded
+# data over the default dataset. It keeps the same interface as the
+# `lookup_sales_data` tool but chooses the data source from session state.
 @tracer.tool()
 def lookup_data_with_upload(prompt: str) -> str:
     """Implementation of data lookup that checks for uploaded file first"""
@@ -156,7 +173,13 @@ def lookup_data_with_upload(prompt: str) -> str:
 
 # Custom agent runner that uses uploaded file
 def run_agent_with_upload(messages):
-    """Run agent with support for uploaded files"""
+    """Run the agent while checking for a user-uploaded dataset.
+
+    This wrapper swaps out the lookup implementation with `lookup_data_with_upload`
+    so the agent operates against the user's dataset if present, and updates
+    the system prompt accordingly. All other tool calls behave the same as
+    the refactored core.
+    """
     from agent_core import (
         analyze_sales_data, handle_tool_calls,
         SYSTEM_PROMPT, tools as original_tools
@@ -214,7 +237,9 @@ Analyze the data and provide insights based on the available columns and data.
                 return response.choices[0].message.content
 
 def start_agent_with_upload(messages):
-    """Start main span for agent execution with upload support"""
+    """Create the root span and invoke `run_agent_with_upload` so the
+    entire execution is recorded as a single observable AgentRun trace.
+    """
     with tracer.start_as_current_span(
         "AgentRun", openinference_span_kind="agent"
     ) as span:
@@ -224,7 +249,9 @@ def start_agent_with_upload(messages):
         span.set_status(StatusCode.OK)
         return ret
 
-# Page configuration
+# Page configuration (Streamlit)
+# Configure the page meta and layout. The app is a simple single-page UI
+# built with Streamlit widgets.
 st.set_page_config(
     page_title="Parquet Pilot - Data Analyst Agent",
     page_icon="📊",
@@ -254,7 +281,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
+# Initialize session state variables used by the UI to retain conversation
+# and uploaded file information for the session's duration.
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -270,11 +298,11 @@ if "uploaded_file_name" not in st.session_state:
 if "uploaded_df" not in st.session_state:
     st.session_state.uploaded_df = None
 
-# Header
+# Header and sub-header
 st.markdown('<p class="main-header">📊 Parquet Pilot</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">LLM-Powered Data Analyst Agent with OpenTelemetry Observability</p>', unsafe_allow_html=True)
 
-# Sidebar
+# Sidebar (upload, examples, and observability links)
 with st.sidebar:
     st.header("About")
     st.markdown("""
@@ -379,7 +407,7 @@ with st.sidebar:
         st.session_state.conversation_history = []
         st.rerun()
 
-# Sample Data Section - Main Screen
+# Main area - sample data viewer and schema preview
 st.header("📊 Sample Data")
 
 # Determine which dataset to show
@@ -429,7 +457,8 @@ else:
 
 st.divider()
 
-# Main chat interface
+# Main chat interface: handles user inputs, applies guardrails, and runs the
+# agent. Visualization code is executed with `exec()` and rendered inline.
 st.header("💬 Chat with the Data Analyst")
 
 # Show active dataset indicator
@@ -531,6 +560,10 @@ if user_input:
                                         'fig': fig
                                     }
 
+                                    # Execute the generated visualization code in a
+                                    # restricted global dict to avoid polluting the
+                                    # app's namespace. This is still potentially
+                                    # risky; exercise caution when enabling uploads.
                                     exec(viz_code, exec_globals)
 
                                     # Display the chart

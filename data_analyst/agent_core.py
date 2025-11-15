@@ -1,5 +1,11 @@
-# Agent Core Module - Refactored for Interactive Usage
-# This module contains the core agent functionality without auto-execution
+"""
+agent_core.py - Core Agent Implementation
+--------------------------------------------------
+Minimal, import-safe module that exposes the agent tools and router used
+by the Streamlit UI and other integrations. This module provides the
+lookup, analysis, and visualization tools as well as the router logic.
+
+"""
 
 from openai import OpenAI
 import pandas as pd
@@ -9,7 +15,7 @@ from pydantic import BaseModel, Field
 from helper import get_openai_api_key
 import warnings
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore')  # silence non-actionable warnings
 
 # Phoenix/OpenTelemetry imports
 import phoenix as px
@@ -20,13 +26,13 @@ from openinference.semconv.trace import SpanAttributes
 from opentelemetry.trace import Status, StatusCode
 from openinference.instrumentation import TracerProvider
 
-# Initialize OpenAI client
+# Initialize OpenAI client (reads API key from .env or env variables)
 openai_api_key = get_openai_api_key()
 client = OpenAI(api_key=openai_api_key)
 
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4o-mini"  # Primary model used for agent operations
 
-# Initialize Phoenix tracing
+# Initialize Phoenix/OpenTelemetry tracing - exports spans to Phoenix
 PROJECT_NAME = "evaluating-agent"
 tracer_provider = register(
     project_name=PROJECT_NAME,
@@ -52,7 +58,12 @@ The table name is: {table_name}
 """
 
 def generate_sql_query(prompt: str, columns: list, table_name: str) -> str:
-    """Generate an SQL query based on a prompt"""
+    """Ask the LLM to create an SQL query string for the provided prompt.
+
+    This function provides a small helper wrapper for formatting the prompt
+    passed to the LLM. It returns raw SQL and relies on callers to sanitize
+    or validate the query before execution.
+    """
     formatted_prompt = SQL_GENERATION_PROMPT.format(
         prompt=prompt,
         columns=columns,
@@ -68,11 +79,13 @@ def generate_sql_query(prompt: str, columns: list, table_name: str) -> str:
 
 @tracer.tool()
 def lookup_sales_data(prompt: str) -> str:
-    """Implementation of sales data lookup from parquet file using SQL"""
+    """Lookup tool: create an in-memory DuckDB table, generate SQL via the
+    LLM, execute the SQL, and return the results as a string.
+    """
     try:
         table_name = "sales"
 
-        # Read the parquet file into a DuckDB table
+        # Read the Parquet into a DataFrame and register as a DuckDB table.
         df = pd.read_parquet(TRANSACTION_DATA_FILE_PATH)
         duckdb.sql(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM df")
 
@@ -93,7 +106,7 @@ def lookup_sales_data(prompt: str) -> str:
         return f"Error accessing data: {str(e)}"
 
 # ============================================================================
-# TOOL 2: Data Analysis
+# TOOL 2: Data Analysis (Human-readable narrative generation)
 # ============================================================================
 
 DATA_ANALYSIS_PROMPT = """
@@ -103,7 +116,9 @@ Your job is to answer the following question: {prompt}
 
 @tracer.tool()
 def analyze_sales_data(prompt: str, data: str) -> str:
-    """Implementation of AI-powered sales data analysis"""
+    """Analysis tool: send the data + prompt to the LLM and return readable
+    analyses and recommendations.
+    """
     formatted_prompt = DATA_ANALYSIS_PROMPT.format(data=data, prompt=prompt)
 
     response = client.chat.completions.create(
@@ -115,7 +130,7 @@ def analyze_sales_data(prompt: str, data: str) -> str:
     return analysis if analysis else "No analysis could be generated"
 
 # ============================================================================
-# TOOL 3: Data Visualization
+# TOOL 3: Data Visualization (configuration -> code generation)
 # ============================================================================
 
 CHART_CONFIGURATION_PROMPT = """
@@ -131,7 +146,9 @@ class VisualizationConfig(BaseModel):
 
 @tracer.chain()
 def extract_chart_config(data: str, visualization_goal: str) -> dict:
-    """Generate chart visualization configuration"""
+    """Ask the LLM to produce a structured chart configuration for a
+    requested visualization goal. On error, fall back to a simple default.
+    """
     formatted_prompt = CHART_CONFIGURATION_PROMPT.format(
         data=data,
         visualization_goal=visualization_goal
@@ -170,7 +187,10 @@ config: {config}
 
 @tracer.chain()
 def create_chart(config: dict) -> str:
-    """Create a chart based on the configuration"""
+    """Ask the LLM to generate Python plotting code for a chart matching
+    the provided `config`. The code is returned as a string and must be
+    executed carefully by the caller.
+    """
     formatted_prompt = CREATE_CHART_PROMPT.format(config=config)
 
     response = client.chat.completions.create(
@@ -186,7 +206,9 @@ def create_chart(config: dict) -> str:
 
 @tracer.tool()
 def generate_visualization(data: str, visualization_goal: str) -> str:
-    """Generate a visualization based on the data and goal"""
+    """High-level visualization tool: create config then generate code.
+    Returns a string with plotting code (not executed here).
+    """
     config = extract_chart_config(data, visualization_goal)
     code = create_chart(config)
     return code
@@ -250,7 +272,9 @@ tool_implementations = {
 
 @tracer.chain()
 def handle_tool_calls(tool_calls, messages):
-    """Execute tools returned in the model's response"""
+    """Dispatch each function call returned by the model and append
+    outputs to the conversation history.
+    """
     for tool_call in tool_calls:
         function = tool_implementations[tool_call.function.name]
         function_args = json.loads(tool_call.function.arguments)
@@ -264,7 +288,9 @@ You are a helpful assistant that can answer questions about the Store Sales Pric
 """
 
 def run_agent(messages):
-    """Main agent orchestration function"""
+    """Router loop: submit messages to the LLM, execute requested tools,
+    and return a final natural-language answer.
+    """
     if isinstance(messages, str):
         messages = [{"role": "user", "content": messages}]
 
