@@ -9,6 +9,13 @@ An AI agent for analyzing retail sales data with comprehensive evaluation and ob
   - LLM-powered data analysis
   - Automated visualization code generation
 
+- **Interactive Web Interface**: Streamlit-based chat application (NEW!)
+  - User-friendly chat interface for natural conversations
+  - Automatic inline visualization rendering
+  - Example questions for quick testing
+  - Real-time Phoenix observability integration
+  - Conversation history management
+
 - **Comprehensive Evaluation System**: Four LLM-as-a-judge evaluators
   - Tool calling accuracy validation
   - Runnable code verification
@@ -54,12 +61,21 @@ pip install -r requirements.txt
 ```
 
 5. **Run the agent**:
-```bash
-cd data_analyst
-python main.py
-```
 
-6. **View results**: Open `http://localhost:6006` to see traces and evaluations
+   **Option A: Streamlit Web Interface (Recommended for interactive use)**
+   ```bash
+   cd data_analyst
+   streamlit run streamlit_app.py
+   ```
+   Open your browser to `http://localhost:8501` to access the chat interface.
+
+   **Option B: Command Line Evaluation Suite**
+   ```bash
+   cd data_analyst
+   python main.py
+   ```
+
+6. **View results**: Open `http://localhost:6006` to see traces and evaluations in Phoenix
 
 7. **Stop Phoenix when done**:
 ```bash
@@ -119,12 +135,16 @@ All evaluations use Phoenix SpanQuery DSL and log results back to the observabil
 ```
 parquet-pilot/
 ├── data_analyst/
+│   ├── streamlit_app.py        # Streamlit web interface (NEW!)
+│   ├── agent_core.py           # Refactored agent module (NEW!)
 │   ├── main.py                 # Evaluation pipeline and test suite
-│   ├── utils.py                # Agent implementation and tools
+│   ├── utils.py                # Agent implementation and tools (original)
 │   ├── helper.py               # Environment utilities
 │   └── data/                   # Parquet data files
 │       └── Store_Sales_Price_Elasticity_Promotions_Data.parquet
+├── requirements.txt            # Python dependencies (NEW!)
 ├── docker-compose.yml          # Phoenix container configuration
+├── STREAMLIT_GUIDE.md          # Streamlit usage guide (NEW!)
 ├── .gitignore                  # Git ignore patterns
 ├── CLAUDE.md                   # Development guidelines
 └── README.md                   # This file
@@ -170,7 +190,32 @@ PHOENIX_ENDPOINT=http://localhost:6006/v1/traces
 
 **For a quick start, see the [Quick Start](#quick-start) section above.**
 
-#### With Docker Compose
+#### Option 1: Streamlit Web Interface (Recommended)
+
+The Streamlit interface provides a user-friendly chat experience:
+
+1. **Start Phoenix**:
+```bash
+docker-compose up -d
+```
+
+2. **Launch Streamlit app**:
+```bash
+cd data_analyst
+streamlit run streamlit_app.py
+```
+
+3. **Open browser**: Navigate to `http://localhost:8501`
+
+4. **Start chatting**: Use the example questions or type your own queries
+
+5. **View traces**: Click the Phoenix link in the sidebar or visit `http://localhost:6006`
+
+For detailed Streamlit usage instructions, see [STREAMLIT_GUIDE.md](STREAMLIT_GUIDE.md).
+
+#### Option 2: Command Line Evaluation Suite
+
+Run the automated evaluation pipeline:
 
 1. **Start Phoenix**:
 ```bash
@@ -185,44 +230,32 @@ python main.py
 
 3. **View results**: Open `http://localhost:6006`
 
-4. **Stop Phoenix**:
-```bash
-docker-compose down
-```
-
-#### With Phoenix CLI
-
-1. **Start Phoenix server**:
-```bash
-phoenix serve
-```
-
-2. **Run agent** (in another terminal):
-```bash
-cd data_analyst
-python main.py
-```
-
-#### What the agent does:
+**What the evaluation suite does:**
 - Executes agent against 6 predefined test questions
 - Generates OpenTelemetry traces
 - Runs all evaluation pipelines
 - Logs results to Phoenix for analysis
 
-#### Interactive mode (single test):
+#### Option 3: Interactive Command Line (Legacy)
+
+Single test with auto-execution:
 ```bash
 cd data_analyst
 python utils.py
 ```
 
+**Note:** `utils.py` executes examples on import. Use `agent_core.py` for programmatic access without auto-execution.
+
 ## Key Technologies
 
 - **OpenAI**: GPT-4 for agent reasoning and tool calling
+- **Streamlit**: Modern web framework for interactive data applications
 - **Phoenix**: Observability platform for LLM applications (containerized via Docker)
 - **OpenInference**: OpenTelemetry semantic conventions for AI
 - **DuckDB**: High-performance SQL analytics engine
 - **Pydantic**: Data validation and structured outputs
 - **Pandas**: Data manipulation and analysis
+- **Matplotlib**: Visualization library for chart generation
 - **Docker**: Container platform for easy Phoenix deployment
 
 ## Observability

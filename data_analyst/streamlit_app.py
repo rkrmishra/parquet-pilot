@@ -116,12 +116,13 @@ for message in st.session_state.messages:
         if "visualization" in message:
             st.pyplot(message["visualization"])
 
-# Handle example question clicks
-if hasattr(st.session_state, 'example_clicked'):
+# Always show the chat input box
+user_input = st.chat_input("Ask a question about the sales data...")
+
+# Handle example question clicks - check this AFTER the chat input
+if hasattr(st.session_state, 'example_clicked') and st.session_state.example_clicked:
     user_input = st.session_state.example_clicked
-    delattr(st.session_state, 'example_clicked')
-else:
-    user_input = st.chat_input("Ask a question about the sales data...")
+    st.session_state.example_clicked = None  # Clear it instead of deleting
 
 # Process user input
 if user_input:

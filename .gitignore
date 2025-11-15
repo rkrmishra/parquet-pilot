@@ -106,6 +106,7 @@ phoenix/
 phoenix.db
 traces/
 spans/
+STREAMLIT_GUIDE.md
 
 # OpenTelemetry
 otel/
