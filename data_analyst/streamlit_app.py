@@ -9,7 +9,13 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for Streamlit
 import io
 import sys
-from agent_core import start_main_span, generate_visualization, lookup_sales_data, client, MODEL
+from agent_core import (
+    start_main_span, generate_visualization, lookup_sales_data,
+    client, MODEL, generate_sql_query, tracer, TRANSACTION_DATA_FILE_PATH
+)
+import pandas as pd
+import duckdb
+from opentelemetry.trace import Status, StatusCode
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -111,6 +117,113 @@ def quick_validation(question: str) -> tuple[bool, str]:
 
     return True, ""
 
+# Custom lookup function that uses uploaded file if available
+@tracer.tool()
+def lookup_data_with_upload(prompt: str) -> str:
+    """Implementation of data lookup that checks for uploaded file first"""
+    try:
+        table_name = "data_table"
+
+        # Check if user uploaded a file
+        if st.session_state.uploaded_file_path and st.session_state.uploaded_df is not None:
+            # Use uploaded file
+            df = st.session_state.uploaded_df
+            file_source = st.session_state.uploaded_file_name
+        else:
+            # Use default file
+            df = pd.read_parquet(TRANSACTION_DATA_FILE_PATH)
+            file_source = "default dataset"
+
+        # Create DuckDB table
+        duckdb.sql(f"DROP TABLE IF EXISTS {table_name}")
+        duckdb.sql(f"CREATE TABLE {table_name} AS SELECT * FROM df")
+
+        # Generate SQL query
+        sql_query = generate_sql_query(prompt, df.columns, table_name)
+        sql_query = sql_query.strip()
+        sql_query = sql_query.replace("```sql", "").replace("```", "")
+
+        # Execute the SQL query
+        with tracer.start_as_current_span("execute_sql_query", openinference_span_kind="chain") as span:
+            span.set_input(sql_query)
+            result = duckdb.sql(sql_query).df()
+            span.set_output(value=str(result))
+            span.set_status(StatusCode.OK)
+
+        return result.to_string()
+    except Exception as e:
+        return f"Error accessing data: {str(e)}"
+
+# Custom agent runner that uses uploaded file
+def run_agent_with_upload(messages):
+    """Run agent with support for uploaded files"""
+    from agent_core import (
+        analyze_sales_data, handle_tool_calls,
+        SYSTEM_PROMPT, tools as original_tools
+    )
+    import json
+
+    # Create custom tool implementations that use uploaded file
+    tool_implementations_custom = {
+        "lookup_sales_data": lookup_data_with_upload,
+        "analyze_sales_data": analyze_sales_data,
+        "generate_visualization": generate_visualization
+    }
+
+    if isinstance(messages, str):
+        messages = [{"role": "user", "content": messages}]
+
+    # Update system prompt based on dataset
+    if st.session_state.uploaded_file_path:
+        system_prompt_text = f"""
+You are a helpful assistant that can answer questions about the uploaded dataset: {st.session_state.uploaded_file_name}.
+Analyze the data and provide insights based on the available columns and data.
+"""
+    else:
+        system_prompt_text = SYSTEM_PROMPT
+
+    if not any(isinstance(message, dict) and message.get("role") == "system" for message in messages):
+        system_prompt = {"role": "system", "content": system_prompt_text}
+        messages.append(system_prompt)
+
+    while True:
+        with tracer.start_as_current_span(
+            "router_call", openinference_span_kind="chain",
+        ) as span:
+            span.set_input(value=messages)
+
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=original_tools,
+            )
+            messages.append(response.choices[0].message.model_dump())
+            tool_calls = response.choices[0].message.tool_calls
+            span.set_status(StatusCode.OK)
+
+            if tool_calls:
+                # Use custom tool implementations
+                for tool_call in tool_calls:
+                    function = tool_implementations_custom[tool_call.function.name]
+                    function_args = json.loads(tool_call.function.arguments)
+                    result = function(**function_args)
+                    messages.append({"role": "tool", "content": result, "tool_call_id": tool_call.id})
+                span.set_output(value=tool_calls)
+            else:
+                span.set_output(value=response.choices[0].message.content)
+                return response.choices[0].message.content
+
+def start_agent_with_upload(messages):
+    """Start main span for agent execution with upload support"""
+    with tracer.start_as_current_span(
+        "AgentRun", openinference_span_kind="agent"
+    ) as span:
+        span.set_input(value=messages)
+        ret = run_agent_with_upload(messages)
+        span.set_output(value=ret)
+        span.set_status(StatusCode.OK)
+        return ret
+
 # Page configuration
 st.set_page_config(
     page_title="Parquet Pilot - Data Analyst Agent",
@@ -148,6 +261,15 @@ if "messages" not in st.session_state:
 if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
 
+if "uploaded_file_path" not in st.session_state:
+    st.session_state.uploaded_file_path = None
+
+if "uploaded_file_name" not in st.session_state:
+    st.session_state.uploaded_file_name = None
+
+if "uploaded_df" not in st.session_state:
+    st.session_state.uploaded_df = None
+
 # Header
 st.markdown('<p class="main-header">📊 Parquet Pilot</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">LLM-Powered Data Analyst Agent with OpenTelemetry Observability</p>', unsafe_allow_html=True)
@@ -171,6 +293,56 @@ with st.sidebar:
     - Only answers retail sales queries
     - Blocks out-of-scope requests
     """)
+
+    st.divider()
+
+    st.header("📁 Upload Your Data")
+    uploaded_file = st.file_uploader(
+        "Upload a Parquet file to analyze",
+        type=['parquet'],
+        help="Upload your own Parquet file to ask questions about your data"
+    )
+
+    if uploaded_file is not None:
+        try:
+            import pandas as pd
+            import tempfile
+            import os
+
+            # Save uploaded file to temporary location
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                temp_path = tmp_file.name
+
+            # Load the file to validate it
+            df = pd.read_parquet(temp_path)
+
+            # Update session state
+            st.session_state.uploaded_file_path = temp_path
+            st.session_state.uploaded_file_name = uploaded_file.name
+            st.session_state.uploaded_df = df
+
+            st.success(f"✅ Loaded: {uploaded_file.name}")
+            st.info(f"📊 {len(df):,} rows × {len(df.columns)} columns")
+
+            # Show preview in expander
+            with st.expander("Preview uploaded data"):
+                st.dataframe(df.head(10), use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error loading file: {str(e)}")
+            st.session_state.uploaded_file_path = None
+            st.session_state.uploaded_file_name = None
+            st.session_state.uploaded_df = None
+
+    elif st.session_state.uploaded_file_path:
+        # Show currently loaded file
+        st.info(f"📊 Using: {st.session_state.uploaded_file_name}")
+        if st.button("🔄 Use Default Dataset", use_container_width=True):
+            st.session_state.uploaded_file_path = None
+            st.session_state.uploaded_file_name = None
+            st.session_state.uploaded_df = None
+            st.rerun()
 
     st.divider()
 
@@ -209,19 +381,26 @@ with st.sidebar:
 
 # Sample Data Section - Main Screen
 st.header("📊 Sample Data")
-with st.expander("View Dataset Schema & Sample", expanded=False):
-    st.markdown("""
-    **Dataset:** Store Sales Price Elasticity Promotions Data
 
-    **Available Fields:**
-    """)
-
-    # Load and display sample data
+# Determine which dataset to show
+if st.session_state.uploaded_file_path and st.session_state.uploaded_df is not None:
+    dataset_name = f"📁 {st.session_state.uploaded_file_name} (Uploaded)"
+    df = st.session_state.uploaded_df
+else:
+    dataset_name = "Store Sales Price Elasticity Promotions Data (Default)"
     try:
-        import pandas as pd
-        from agent_core import TRANSACTION_DATA_FILE_PATH
-
         df = pd.read_parquet(TRANSACTION_DATA_FILE_PATH)
+    except Exception as e:
+        st.error(f"Could not load default dataset: {str(e)}")
+        df = None
+
+if df is not None:
+    with st.expander(f"View Dataset Schema & Sample - {dataset_name}", expanded=False):
+        st.markdown(f"""
+        **Dataset:** {dataset_name}
+
+        **Available Fields:**
+        """)
 
         st.markdown(f"**Total Records:** {len(df):,}")
         st.markdown("**Columns:**")
@@ -239,21 +418,25 @@ with st.expander("View Dataset Schema & Sample", expanded=False):
 
         st.markdown("""
         **Query Ideas:**
-        - Ask about specific stores, products, or dates
-        - Request aggregations (total, average, count)
-        - Compare performance across dimensions
-        - Analyze promotional impact
-        - Visualize trends over time
+        - Ask about specific columns and their values
+        - Request aggregations (total, average, count, min, max)
+        - Compare performance across different dimensions
+        - Filter data by specific conditions
+        - Visualize trends and patterns
         """)
-
-    except Exception as e:
-        st.error(f"Could not load sample data: {str(e)}")
-        st.info("Make sure you're running from the data_analyst directory")
+else:
+    st.warning("No dataset available. Please upload a Parquet file or ensure the default dataset is accessible.")
 
 st.divider()
 
 # Main chat interface
 st.header("💬 Chat with the Data Analyst")
+
+# Show active dataset indicator
+if st.session_state.uploaded_file_path:
+    st.info(f"🔍 Analyzing: **{st.session_state.uploaded_file_name}** ({len(st.session_state.uploaded_df):,} rows)")
+else:
+    st.info("🔍 Analyzing: **Default Store Sales Dataset**")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -316,8 +499,8 @@ if user_input:
                         # Add current user message
                         conversation.append({"role": "user", "content": user_input})
 
-                        # Get response from agent
-                        response = start_main_span(conversation)
+                        # Get response from agent - use custom runner with upload support
+                        response = start_agent_with_upload(conversation)
 
                         # Update conversation history
                         st.session_state.conversation_history = conversation
@@ -330,8 +513,8 @@ if user_input:
                         if any(keyword in user_input.lower() for keyword in ["chart", "graph", "plot", "visualize", "visualization", "show me"]):
                             try:
                                 with st.spinner("Generating visualization..."):
-                                    # Get data first
-                                    data = lookup_sales_data(user_input)
+                                    # Get data first - use uploaded file if available
+                                    data = lookup_data_with_upload(user_input)
 
                                     # Generate visualization code
                                     viz_goal = user_input
