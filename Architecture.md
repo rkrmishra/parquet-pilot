@@ -6,6 +6,13 @@ This document provides a concise, practical, and human-written guide to the Parq
 
 Parquet Pilot is an LLM-driven data analyst agent designed to analyze retail sales data stored in Parquet format. The agent uses three purpose-built tools to answer natural-language questions about the data, produce human-readable analyses, and generate runnable visualization code. Every step is instrumented with OpenTelemetry and recorded to the Phoenix observability platform to make behavior, performance, and evaluation results easy to inspect.
 
+The system features an interactive **Streamlit web interface** that allows users to:
+- Query pre-loaded sample data to test the system's capabilities
+- Upload their own Parquet files for custom data analysis
+- View sample data and column schemas to understand their datasets
+- Access predefined example questions for guidance
+- Trace complete agent execution logs through Phoenix integration
+
 ### Core Architecture Principles
 
 The system is built on three foundational pillars:
@@ -19,22 +26,117 @@ The system is built on three foundational pillars:
 - **Natural Language to SQL Translation**: Convert natural-language questions into SQL queries and execute them against Parquet datasets using DuckDB's high-performance query engine
 - **Intelligent Data Analysis**: Produce human-readable narratives that interpret query results and provide actionable business insights
 - **Dynamic Visualization Generation**: Generate executable Python plotting code (matplotlib-based) tailored to the specific data and visualization goals
+- **Interactive Web Interface**: User-friendly Streamlit application with file upload, sample data exploration, example questions, and conversational chat interface
+- **Smart Guardrails**: Two-tier validation system (keyword-based + LLM-based) to ensure questions remain within scope
+- **Custom Data Support**: Upload and analyze your own Parquet files alongside the default retail sales dataset
 - **Full Observability Stack**: Record traces, metrics, and evaluation results in Phoenix for debugging, performance analysis, and quality assurance
 - **Automated Quality Evaluation**: LLM-as-a-judge evaluations for tool selection accuracy, SQL correctness, code runnability, and response clarity
 
 ### System Architecture Overview
 
 ```mermaid
-graph LR
-    U[User] --> A[Agent]
+graph TB
+    U[User] --> ST[Streamlit UI]
+    ST --> GR[Guardrails]
+    GR --> A[Agent Core]
     A --> L[LLM]
     L --> T[Tools]
     T --> D[DuckDB]
-    A --> P[Phoenix]
+    ST --> UF[File Upload]
+    UF --> D
+    A --> P[Phoenix Observability]
+    ST --> P
     
+    style ST fill:#e1f5fe
     style L fill:#fff4e6
     style D fill:#e8f5e9
     style P fill:#f3e5f5
+    style GR fill:#fff9c4
+```
+
+### Detailed Component Architecture
+
+```mermaid
+graph TB
+    subgraph "User Interface Layer"
+        UI[Streamlit Web App]
+        CHAT[Chat Interface]
+        UPLOAD[File Upload]
+        EXAMPLES[Example Questions]
+        PREVIEW[Data Preview]
+    end
+    
+    subgraph "Validation Layer"
+        QUICK[Quick Validation]
+        LLM_VAL[LLM Validation]
+    end
+    
+    subgraph "Agent Layer"
+        ROUTER[Agent Router]
+        SYSTEM[System Prompt]
+    end
+    
+    subgraph "LLM Layer"
+        GPT[GPT-4o-mini]
+        TOOLS_DEF[Tool Definitions]
+    end
+    
+    subgraph "Tool Execution Layer"
+        LOOKUP[lookup_sales_data]
+        ANALYZE[analyze_sales_data]
+        VISUALIZE[generate_visualization]
+    end
+    
+    subgraph "Data Layer"
+        DEFAULT[Default Dataset]
+        USER_DATA[User Upload]
+        DUCKDB[DuckDB Engine]
+    end
+    
+    subgraph "Observability Layer"
+        SPANS[OpenTelemetry Spans]
+        PHOENIX[Phoenix UI]
+        EVALS[Evaluations]
+    end
+    
+    UI --> CHAT
+    UI --> UPLOAD
+    UI --> EXAMPLES
+    UI --> PREVIEW
+    
+    CHAT --> QUICK
+    QUICK --> LLM_VAL
+    LLM_VAL --> ROUTER
+    
+    ROUTER --> SYSTEM
+    ROUTER --> GPT
+    GPT --> TOOLS_DEF
+    
+    TOOLS_DEF --> LOOKUP
+    TOOLS_DEF --> ANALYZE
+    TOOLS_DEF --> VISUALIZE
+    
+    UPLOAD --> USER_DATA
+    DEFAULT --> DUCKDB
+    USER_DATA --> DUCKDB
+    
+    LOOKUP --> DUCKDB
+    ANALYZE --> GPT
+    VISUALIZE --> GPT
+    
+    ROUTER --> SPANS
+    LOOKUP --> SPANS
+    ANALYZE --> SPANS
+    VISUALIZE --> SPANS
+    SPANS --> PHOENIX
+    EVALS --> PHOENIX
+    
+    style UI fill:#e1f5fe
+    style QUICK fill:#fff9c4
+    style LLM_VAL fill:#fff9c4
+    style GPT fill:#fff4e6
+    style DUCKDB fill:#e8f5e9
+    style PHOENIX fill:#f3e5f5
 ```
 
 ## Goals and intended uses
@@ -63,19 +165,31 @@ This project serves multiple purposes for developers, data scientists, and AI en
    - Include real data and realistic use cases for retail analytics
    - Serve as a starting point for experiments in agentic systems, model evaluation, and instrumentation
 
+5. **Interactive Web Interface**:
+   - Demonstrate how to build user-friendly interfaces for LLM agents using Streamlit
+   - Show proper integration of guardrails and validation in production-like applications
+   - Illustrate file upload handling and dynamic data source switching
+   - Provide patterns for session state management in conversational interfaces
+
 ### Intended Use Cases
 
 ```mermaid
 mindmap
   root((Use Cases))
     Learning
-      Patterns
+      Agent Patterns
       Observability
+      Guardrails
     Development
       Prototyping
       Testing
+      UI Design
     Research
       Benchmarking
+      Evaluation
+    Interactive
+      Data Exploration
+      Custom Analysis
 ```
 
 ### Non-Goals (Out of Scope)
@@ -92,12 +206,14 @@ mindmap
 parquet-pilot/
 ├── data_analyst/
 │   ├── main.py                 # Evaluation runner that triggers end-to-end agent runs
-│   ├── utils.py                # Agent implementation (tools, router, instrumented spans)
-│   ├── helper.py               # Small environment helpers (dotenv loader, API key helper)
+│   ├── agent_core.py           # Core agent implementation (tools, router, instrumented spans)
+│   ├── utils.py                # Utility functions and helpers
+│   ├── helper.py               # Environment helpers (dotenv loader, API key helper)
+│   ├── streamlit_app.py        # Interactive Streamlit web interface
 │   └── data/                   # Parquet dataset used by the agent
 ├── docker-compose.yml          # Phoenix observability container configuration
-├── README.md                   # Original project README
-├── readme2.md                  # This human-written detailed README
+├── Architecture.md             # Comprehensive architecture documentation
+├── README.md                   # Project README
 └── LICENSE
 ```
 
@@ -238,6 +354,288 @@ graph TD
     style A fill:#fce4ec
     style V fill:#f3e5f5
 ```
+
+## Streamlit User Interface
+
+The system includes a comprehensive web interface built with Streamlit (`streamlit_app.py`) that provides an intuitive way to interact with the data analyst agent.
+
+### User Interaction Flow
+
+```mermaid
+graph TD
+    Start[User Opens App] --> Choice{Action?}
+    Choice -->|Query Sample| Sample[Query Default Dataset]
+    Choice -->|Upload File| Upload[Upload Parquet File]
+    
+    Sample --> View1[View Sample Data]
+    Upload --> View2[View Uploaded Data]
+    
+    View1 --> Examples[View Example Questions]
+    View2 --> Examples
+    
+    Examples --> Query[Enter Question]
+    Query --> Guard[Guardrail Validation]
+    
+    Guard -->|Invalid| Error[Show Error Message]
+    Guard -->|Valid| Agent[Agent Processing]
+    
+    Agent --> Response[Display Response]
+    Response -->|Visualization Request| Viz[Generate & Display Chart]
+    Response -->|Text Only| Display[Show Analysis]
+    
+    Viz --> Phoenix[View Traces in Phoenix]
+    Display --> Phoenix
+    Phoenix --> Query
+    Error --> Query
+    
+    style Guard fill:#fff9c4
+    style Agent fill:#e1f5fe
+    style Phoenix fill:#f3e5f5
+```
+
+### Key Features
+
+#### 1. Sample Data Exploration
+- **Default Dataset**: Users can immediately query the pre-loaded Store Sales Price Elasticity Promotions dataset
+- **Schema Viewer**: Expandable section showing:
+  - Total record count
+  - Column names and data types
+  - Sample values for each column
+  - First 5 rows of data
+- **Query Ideas**: Suggestions for types of analyses users can perform
+
+#### 2. Custom Data Upload
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant ST as Streamlit
+    participant FS as File System
+    participant DB as DuckDB
+    participant A as Agent
+    
+    U->>ST: Upload Parquet File
+    ST->>FS: Save to Temp Location
+    FS->>ST: Return File Path
+    ST->>DB: Load Data
+    DB->>ST: Validation Success
+    ST->>U: Show Preview & Column Info
+    U->>ST: Ask Question
+    ST->>A: Query with Uploaded Data
+    A->>DB: Execute on User Data
+    DB->>A: Results
+    A->>ST: Response
+    ST->>U: Display Answer
+```
+
+**Upload Process**:
+1. User selects Parquet file via sidebar uploader
+2. File is validated and saved to temporary location
+3. Data is loaded into pandas DataFrame
+4. Preview shows row count, column count, and first 10 rows
+5. Session state tracks uploaded file for all subsequent queries
+6. Users can switch back to default dataset at any time
+
+#### 3. Smart Guardrails System
+
+```mermaid
+flowchart LR
+    Q[User Question] --> Quick[Quick Validation]
+    Quick -->|Pass| LLM[LLM Validation]
+    Quick -->|Fail| Reject1[Reject with Message]
+    LLM -->|In Scope| Agent[Process with Agent]
+    LLM -->|Out of Scope| Reject2[Reject with Guidance]
+    
+    style Quick fill:#fff9c4
+    style LLM fill:#fff4e6
+    style Agent fill:#e8f5e9
+```
+
+**Two-Tier Validation**:
+
+**Quick Validation** (Keyword-based):
+- Blocks harmful patterns (hack, exploit, jailbreak, etc.)
+- Rejects questions under 3 characters
+- Limits questions to 1000 characters
+- Fast pre-check before LLM validation
+
+**LLM Validation** (Semantic):
+- Uses GPT-4o-mini to determine if question is within scope
+- Validates against allowed topics:
+  - Store performance and sales metrics
+  - Product sales, SKUs, and categories
+  - Transaction data and revenue
+  - Promotional campaigns and impact
+  - Price elasticity and pricing data
+  - Sales trends over time
+  - Geographic/regional analysis
+- Provides helpful error messages for out-of-scope questions
+- Returns structured VALID/INVALID response
+
+#### 4. Predefined Example Questions
+
+**Sidebar Panel** features clickable example questions:
+- "What was the most popular product SKU?"
+- "What was the total revenue across all stores?"
+- "Which store had the highest sales volume?"
+- "Create a bar chart showing total sales by store"
+- "What percentage of items were sold on promotion?"
+- "What was the average transaction value?"
+- "Show me sales trends for the top 5 products"
+
+Clicking an example automatically populates the chat input and submits the query.
+
+#### 5. Phoenix Observability Integration
+
+```mermaid
+graph LR
+    ST[Streamlit App] --> Spans[Create Spans]
+    Spans --> Agent[Agent Execution]
+    Agent --> Tools[Tool Calls]
+    Tools --> Phoenix[Phoenix Collector]
+    Phoenix --> UI[Phoenix UI :6006]
+    
+    UI --> Traces[View Traces]
+    UI --> Eval[View Evaluations]
+    UI --> Metrics[View Metrics]
+    
+    style Phoenix fill:#f3e5f5
+    style UI fill:#e1f5fe
+```
+
+**Trace Visibility**:
+- All agent operations are instrumented with OpenTelemetry
+- Sidebar provides direct link to Phoenix UI (localhost:6006)
+- Project name: `evaluating-agent`
+- Users can trace:
+  - Complete conversation flows
+  - Tool selection decisions
+  - SQL query generation and execution
+  - Visualization code generation
+  - Error states and exceptions
+  - Performance metrics (latency, token usage)
+
+#### 6. Interactive Chat Interface
+
+**Features**:
+- Persistent conversation history within session
+- Clear visual distinction between user and assistant messages
+- Real-time processing indicators (spinners)
+- Inline visualization rendering for charts
+- Active dataset indicator (shows which data is being queried)
+- Clear conversation button to reset state
+
+**Visualization Handling**:
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as Chat Interface
+    participant A as Agent
+    participant V as Viz Generator
+    participant M as Matplotlib
+    
+    U->>UI: Ask for chart/graph/plot
+    UI->>A: Process with lookup
+    A->>UI: Return data
+    UI->>V: Generate visualization code
+    V->>M: Execute code
+    M->>UI: Return figure
+    UI->>U: Display inline chart
+```
+
+Keywords that trigger visualization: chart, graph, plot, visualize, visualization, show me
+
+### Session State Management
+
+Streamlit maintains the following session state:
+
+```python
+{
+    "messages": [],                    # Chat display messages
+    "conversation_history": [],        # Agent conversation context
+    "uploaded_file_path": None,        # Temp file path
+    "uploaded_file_name": None,        # Original filename
+    "uploaded_df": None,               # Loaded DataFrame
+    "example_clicked": None            # Clicked example question
+}
+```
+
+### Custom Agent Integration
+
+**File-Aware Agent Functions**:
+
+1. **`lookup_data_with_upload()`**: Modified lookup tool that:
+   - Checks for uploaded file in session state
+   - Falls back to default dataset if none uploaded
+   - Creates DuckDB table from appropriate source
+   - Maintains same tool interface for LLM
+
+2. **`run_agent_with_upload()`**: Custom agent runner that:
+   - Uses uploaded file when available
+   - Updates system prompt based on active dataset
+   - Maintains full tool-calling loop functionality
+   - Preserves observability spans
+
+3. **`start_agent_with_upload()`**: Wrapper that:
+   - Creates root span for observability
+   - Tracks inputs and outputs
+   - Handles errors gracefully
+
+### User Experience Flow
+
+**Typical User Journey**:
+
+1. **Initial Exploration**:
+   - User opens app and sees default dataset preview
+   - Reviews sample data schema and column types
+   - Reads example questions in sidebar
+   - Clicks an example to see agent in action
+
+2. **Testing Capabilities**:
+   - User experiments with natural language queries
+   - Requests various analysis types (aggregations, trends, comparisons)
+   - Asks for visualizations (charts, graphs, plots)
+   - Observes agent tool selection and reasoning
+
+3. **Custom Data Analysis**:
+   - User uploads their own Parquet file
+   - Reviews uploaded data preview
+   - Adapts questions to their specific dataset
+   - Performs domain-specific analysis
+
+4. **Observability & Debugging**:
+   - User encounters unexpected results
+   - Opens Phoenix UI to trace agent execution
+   - Examines tool calls, SQL queries, and LLM responses
+   - Refines questions based on insights
+
+### Error Handling
+
+```mermaid
+graph TD
+    Error[Error Occurs] --> Type{Error Type?}
+    Type -->|Guardrail| Guard[Show Scope Message]
+    Type -->|Upload| Upload[Show File Error]
+    Type -->|Query| Query[Show SQL Error]
+    Type -->|Viz| Viz[Show Viz Warning]
+    Type -->|Agent| Agent[Show Generic Error]
+    
+    Guard --> Retry[User Can Retry]
+    Upload --> Retry
+    Query --> Phoenix[Check Phoenix Logs]
+    Viz --> Continue[Continue Without Chart]
+    Agent --> Phoenix
+    
+    style Guard fill:#fff9c4
+    style Phoenix fill:#f3e5f5
+```
+
+**Error Types Handled**:
+- Guardrail rejections → Clear guidance on acceptable questions
+- File upload failures → Validation error messages
+- SQL execution errors → Captured in spans, displayed to user
+- Visualization errors → Warning displayed, text response shown
+- Agent exceptions → Generic error message, full trace in Phoenix
 
 ## Implementation details
 
@@ -868,8 +1266,19 @@ pip list
 
 **If requirements.txt is missing**, install manually:
 ```powershell
-pip install openai pandas duckdb arize-phoenix opentelemetry-api python-dotenv matplotlib pydantic
+pip install openai pandas duckdb arize-phoenix opentelemetry-api python-dotenv matplotlib pydantic streamlit
 ```
+
+**Key Dependencies Explained**:
+- `openai` - OpenAI API client for GPT models
+- `pandas` - DataFrame operations and data manipulation
+- `duckdb` - In-memory SQL engine for Parquet queries
+- `arize-phoenix` - Observability platform for LLM applications
+- `opentelemetry-api` - OpenTelemetry instrumentation
+- `python-dotenv` - Environment variable management
+- `matplotlib` - Visualization library
+- `pydantic` - Data validation and schema definition
+- `streamlit` - Web interface framework
 
 #### Step 6: Verify Phoenix UI Access
 
@@ -897,7 +1306,60 @@ Start-Process "http://localhost:6006"
 
 ### Running the Application
 
-#### Option A: Run Evaluation Pipeline (Full System Test)
+#### Option A: Interactive Web Interface (Recommended)
+
+The Streamlit web interface provides the most user-friendly way to interact with Parquet Pilot.
+
+```mermaid
+graph LR
+    A[cd data_analyst] --> B[streamlit run]
+    B --> C[Web Browser]
+    C --> D[Upload & Query]
+    D --> E[View Results]
+    E --> F[Phoenix Traces]
+    
+    style C fill:#e1f5fe
+    style F fill:#f3e5f5
+```
+
+**Commands**:
+```powershell
+# Navigate to data_analyst directory
+cd data_analyst
+
+# Run the Streamlit application
+streamlit run streamlit_app.py
+
+# Expected output:
+# You can now view your Streamlit app in your browser.
+# Local URL: http://localhost:8501
+# Network URL: http://192.168.x.x:8501
+```
+
+**Access the Application**:
+- Open browser to `http://localhost:8501`
+- Interface loads with default dataset preview
+- Use sidebar to explore features:
+  - Upload your own Parquet file
+  - Click example questions
+  - Access Phoenix observability link
+  - Clear conversation history
+
+**Key Features Available**:
+- Query pre-loaded sample data immediately
+- Upload custom Parquet files for analysis
+- View dataset schemas and sample rows
+- Get suggestions from predefined questions
+- See real-time agent processing
+- View inline visualizations
+- Trace execution in Phoenix UI
+
+**Stopping the Application**:
+```powershell
+# Press Ctrl+C in the terminal to stop the Streamlit server
+```
+
+#### Option B: Run Evaluation Pipeline (Full System Test)
 
 ```mermaid
 graph LR
@@ -939,7 +1401,7 @@ python main.py
    - Response clarity
 4. Logs all evaluation results to Phoenix
 
-#### Option B: Interactive Agent Session (Single Query)
+#### Option C: Interactive Agent Session (Single Query)
 
 ```mermaid
 graph LR
@@ -954,11 +1416,11 @@ graph LR
 # Navigate to data_analyst
 cd data_analyst
 
-# Run utils.py (note: executes examples on import!)
-python utils.py
+# Run agent_core.py (note: executes examples on import!)
+python agent_core.py
 
 # Or run interactively:
-python -i utils.py
+python -i agent_core.py
 
 # Then call agent manually:
 >>> messages = [{"role": "user", "content": "What are top 5 products?"}]
@@ -966,13 +1428,13 @@ python -i utils.py
 >>> print(response)
 ```
 
-⚠️ **Warning**: Running `utils.py` directly executes example queries at import time, which:
+⚠️ **Warning**: Running `agent_core.py` directly executes example queries at import time, which:
 - Makes OpenAI API calls (costs money)
 - Requires data file to exist
 - Executes `exec()` on generated code
 - Creates spans in Phoenix
 
-#### Option C: Custom Script
+#### Option D: Custom Script
 
 Create a new file for custom queries:
 
@@ -984,7 +1446,7 @@ notepad run_custom.py
 
 Add to `run_custom.py`:
 ```python
-from utils import run_agent
+from agent_core import run_agent
 
 # Your custom question
 question = "What was the average revenue per transaction in Q4?"
@@ -1000,6 +1462,17 @@ Run it:
 ```powershell
 python run_custom.py
 ```
+
+**Comparison of Running Options**:
+
+| Option | Use Case | User-Friendly | Observability | Custom Data |
+|--------|----------|---------------|---------------|-------------|
+| **A: Streamlit** | Interactive exploration | ⭐⭐⭐⭐⭐ | Full traces | ✅ Upload files |
+| **B: Evaluation** | Quality testing | ⭐⭐ | Full traces + evals | ❌ Default only |
+| **C: Agent Session** | Quick testing | ⭐⭐⭐ | Full traces | ❌ Default only |
+| **D: Custom Script** | Automation | ⭐⭐⭐⭐ | Full traces | ✅ Scriptable |
+
+**Recommendation**: Start with **Option A (Streamlit)** for the best user experience, then use Option B for evaluation and Option D for automation.
 
 ### Viewing Results in Phoenix
 
