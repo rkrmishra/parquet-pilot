@@ -206,16 +206,40 @@ mindmap
 parquet-pilot/
 ├── data_analyst/
 │   ├── main.py                 # Evaluation runner that triggers end-to-end agent runs
-│   ├── agent_core.py           # Core agent implementation (tools, router, instrumented spans)
-│   ├── utils.py                # Utility functions and helpers
+│   ├── agent_core.py           # Refactored agent core (no auto-execution, for imports)
+│   ├── utils.py                # Original full implementation with example auto-execution
 │   ├── helper.py               # Environment helpers (dotenv loader, API key helper)
 │   ├── streamlit_app.py        # Interactive Streamlit web interface
 │   └── data/                   # Parquet dataset used by the agent
 ├── docker-compose.yml          # Phoenix observability container configuration
+├── requirements.txt            # Python dependencies
 ├── Architecture.md             # Comprehensive architecture documentation
 ├── README.md                   # Project README
 └── LICENSE
 ```
+
+### File Implementation Notes
+
+**agent_core.py vs utils.py**:
+
+Both files contain functionally identical implementations of the agent with the same tools, router logic, and instrumentation. The key difference is execution behavior:
+
+| Aspect | agent_core.py | utils.py |
+|--------|--------------|----------|
+| **Purpose** | Clean module for imports | Teaching/demo with examples |
+| **Auto-execution** | None | Runs 4 examples on import |
+| **Import safety** | ✅ Safe | ⚠️ Triggers API calls |
+| **Used by** | streamlit_app.py | main.py (for compatibility) |
+| **Print statements** | Minimal | Verbose with debug output |
+| **Recommended for** | Production, new code | Learning, demonstrations |
+
+**What auto-executes in utils.py**:
+1. `lookup_sales_data("Show me all the sales for store 1320 on November 1st, 2021")`
+2. `analyze_sales_data(prompt="what trends do you see", data=example_data)`
+3. `generate_visualization()` + `exec(code)` - displays matplotlib chart
+4. `start_main_span([{"role": "user", "content": "Which stores did the best in 2021?"}])`
+
+All examples print results to console and create spans in Phoenix.
 
 ## How it works — step-by-step
 
@@ -244,7 +268,7 @@ graph TD
    - System initializes a message context with user role and content
    - System prompt is attached, providing the agent with its identity, capabilities, and operational guidelines
 
-2. **Router Orchestration** (`utils.py::run_agent`)
+2. **Router Orchestration** (`agent_core.py::run_agent` or `utils.py::run_agent`)
    - Router sends the conversation to OpenAI's API with:
      - Current messages (conversation history)
      - Tool schemas (JSON descriptions of available functions)
@@ -562,6 +586,8 @@ Streamlit maintains the following session state:
 
 ### Custom Agent Integration
 
+The Streamlit app imports from `agent_core.py` (the clean, non-auto-executing version) and extends it with file upload capabilities.
+
 **File-Aware Agent Functions**:
 
 1. **`lookup_data_with_upload()`**: Modified lookup tool that:
@@ -639,7 +665,7 @@ graph TD
 
 ## Implementation details
 
-The following details were confirmed by inspecting the project's source files (`data_analyst/utils.py`, `data_analyst/main.py`, and `data_analyst/helper.py`). These are concrete names, constants, and behaviors you should be aware of when running or extending the project.
+The following details were confirmed by inspecting the project's source files (`data_analyst/agent_core.py`, `data_analyst/utils.py`, `data_analyst/main.py`, and `data_analyst/helper.py`). These are concrete names, constants, and behaviors you should be aware of when running or extending the project.
 
 ### Core Dependencies and Configuration
 
@@ -661,7 +687,7 @@ graph LR
   from openai import OpenAI
   client = OpenAI(api_key=openai_api_key)
   ```
-  Located in `data_analyst/utils.py`
+  Located in both `data_analyst/agent_core.py` and `data_analyst/utils.py`
 
 - **Model Constants**:
   - Primary model: `MODEL = "gpt-4o-mini"` (used for agent operations)
@@ -686,7 +712,7 @@ sequenceDiagram
   ```
 
 - **Project Configuration**:
-  - `PROJECT_NAME = "evaluating-agent"` (defined in both `utils.py` and `main.py`)
+  - `PROJECT_NAME = "evaluating-agent"` (defined in `agent_core.py`, `utils.py`, and `main.py`)
   - All spans are tagged with this project name for filtering in Phoenix UI
 
 - **OpenAI Instrumentation**:
@@ -703,7 +729,7 @@ sequenceDiagram
   ```python
   TRANSACTION_DATA_FILE_PATH = 'data/Store_Sales_Price_Elasticity_Promotions_Data.parquet'
   ```
-  Defined in `utils.py`
+  Defined in both `agent_core.py` and `utils.py`
 
 - **Expected Schema**: The dataset should contain retail transaction fields:
   - Store identifiers (store_id, region, etc.)
@@ -899,31 +925,44 @@ The `tools` list contains JSON schemas describing each function to the LLM:
 
 ⚠️ **Critical for Maintainers**:
 
-The file `data_analyst/utils.py` executes example calls **at import time**:
+**Two versions of the agent implementation exist**:
 
-```python
-# At module level (runs on import!)
-result = lookup_sales_data("What are the top 5 products by revenue?")
-print(result)
+1. **`agent_core.py`** (Refactored - No Auto-Execution):
+   - Clean module designed for imports
+   - Contains all tool implementations and agent logic
+   - Does NOT execute examples at import time
+   - Safe to import in other modules (e.g., `streamlit_app.py`)
+   - Recommended for production use and imports
 
-analysis = analyze_sales_data("Interpret this data", result)
-print(analysis)
+2. **`utils.py`** (Original - With Auto-Execution):
+   - Original implementation with example calls at module level
+   - Executes demonstration queries when imported or run
+   - Example calls include:
+     ```python
+     # Auto-executes on import:
+     example_data = lookup_sales_data("Show me all the sales for store 1320...")
+     print(example_data)
+     
+     print(analyze_sales_data(prompt="what trends...", data=example_data))
+     
+     code = generate_visualization(example_data, "A bar chart...")
+     exec(code)  # Executes matplotlib code!
+     
+     result = start_main_span([{"role": "user", "content": "Which stores..."}])
+     ```
 
-code = generate_visualization(result, "Create a bar chart")
-print(code)
-exec(code)  # Executes generated plotting code!
-```
+**Implications when importing `utils.py`**:
+- Requires valid `OPENAI_API_KEY`
+- Requires Parquet file at expected path
+- Makes OpenAI API calls (costs money)
+- Executes `exec(code)` for visualization
+- Creates spans in Phoenix
+- May display matplotlib plots
 
-**Implications**:
-- Importing `utils.py` requires:
-  - Valid `OPENAI_API_KEY`
-  - Parquet file at expected path
-  - All dependencies installed
-  - Network connectivity to OpenAI
-- May cause unexpected API charges
-- `exec(code)` may fail if matplotlib not configured properly
-
-**Recommendation**: Refactor to use `if __name__ == "__main__":` guard or move to separate example script
+**Recommendation**: 
+- Use `agent_core.py` for imports and production code
+- Use `utils.py` only for learning/demonstration purposes
+- `streamlit_app.py` correctly imports from `agent_core.py`
 
 ### Evaluation Pipeline Architecture
 
@@ -938,73 +977,128 @@ graph LR
     style P fill:#e0f2f1
 ```
 
-**Test Questions Set** (`agent_questions`):
+**Test Questions Set** (`agent_questions` in `main.py`):
 ```python
 agent_questions = [
     "What was the most popular product SKU?",
-    "Show me total revenue by store",
-    "Which products have the highest price elasticity?",
-    "Analyze promotion effectiveness",
-    "Create a visualization of monthly sales trends",
-    "What's the correlation between price and quantity sold?"
+    "What was the total revenue across all stores?",
+    "Which store had the highest sales volume?",
+    "Create a bar chart showing total sales by store",
+    "What percentage of items were sold on promotion?",
+    "What was the average transaction value?"
 ]
 ```
 
-**Evaluation Types**:
+**Evaluation Types** (implemented in `main.py`):
 
-1. **Tool Selection Evaluation**:
-   - Validates correct tool choice for task type
+1. **Tool Calling Evaluation** (`Tool Calling Eval`):
+   - Validates correct tool choice for task type using Phoenix's `TOOL_CALLING_PROMPT_TEMPLATE`
+   - Queries spans where `span_kind == 'LLM'` with tool calls
+   - Labels: "correct", "incorrect"
+   - Uses GPT-4o as judge with `llm_classify()`
+   - Provides explanations for decisions
+
+2. **SQL Correctness Evaluation** (`SQL Gen Eval`):
+   - Validates generated SQL matches intent using custom `SQL_EVAL_GEN_PROMPT`
+   - Filters LLM spans containing "Generate an SQL query based on a prompt."
+   - Evaluates based on instruction, generated query, and response
    - Labels: "correct", "incorrect"
    - Uses GPT-4o as judge
 
-2. **SQL Correctness Evaluation**:
-   - Validates generated SQL matches intent
-   - Checks for syntax errors and logical correctness
-   - Labels: "correct", "incorrect", "partially_correct"
-
-3. **Code Runnable Evaluation**:
-   - Attempts to execute generated visualization code
-   - Checks for runtime errors
+3. **Code Runnability Evaluation** (`Runnable Code Eval`):
+   - Attempts to execute generated visualization code using `exec()`
+   - Queries spans where `name == 'generate_visualization'`
+   - Extracts code from `output.value`
    - Labels: "runnable", "not_runnable"
+   - Pure Python execution test (no LLM judge)
 
-4. **Response Clarity Evaluation**:
-   - Assesses response quality and coherence
+4. **Response Clarity Evaluation** (`Response Clarity`):
+   - Assesses response quality and coherence using custom `CLARITY_LLM_JUDGE_PROMPT`
+   - Queries spans where `span_kind == 'AGENT'`
+   - Evaluates both query and response
    - Labels: "clear", "unclear"
-   - Includes reasoning explanation
+   - Uses GPT-4o as judge with detailed reasoning
 
-**Evaluation Execution**:
+**Evaluation Execution Flow** (from `main.py`):
 ```python
-with suppress_tracing():  # Prevent eval traces
-    evaluations = llm_classify(
-        dataframe=span_df,
+# 1. Run agent on all test questions
+for question in tqdm(agent_questions, desc="Processing questions"):
+    ret = start_main_span([{"role": "user", "content": question}])
+
+# 2. Query spans from Phoenix
+query = SpanQuery().where("span_kind == 'LLM'").select(...)
+tool_calls_df = px.Client().query_spans(query, project_name=PROJECT_NAME)
+
+# 3. Run LLM-based evaluation with tracing suppressed
+with suppress_tracing():
+    tool_call_eval = llm_classify(
+        dataframe=tool_calls_df,
+        template=TOOL_CALLING_PROMPT_TEMPLATE.template[0].template,
+        rails=['correct', 'incorrect'],
         model=OpenAIModel(model="gpt-4o"),
-        template=evaluation_template,
-        rails=["correct", "incorrect"]
+        provide_explanation=True
     )
 
-phoenix.Client().log_evaluations(
-    evaluations,
-    project_name=PROJECT_NAME
+# 4. Add scores and log back to Phoenix
+tool_call_eval['score'] = tool_call_eval.apply(
+    lambda x: 1 if x['label']=='correct' else 0, axis=1
+)
+
+px.Client().log_evaluations(
+    SpanEvaluations(eval_name="Tool Calling Eval", dataframe=tool_call_eval)
 )
 ```
+
+This pattern repeats for all four evaluation types, each querying different spans and using appropriate templates.
+
+**Code Runnability Check** (unique approach):
+```python
+def code_is_runnable(output: str) -> bool:
+    """Check if the code is runnable"""
+    output = output.strip()
+    output = output.replace("```python", "").replace("```", "")
+    try:
+        exec(output)
+        return True
+    except Exception as e:
+        return False
+
+# Applied directly to dataframe
+code_gen_df["label"] = code_gen_df["generated_code"].apply(code_is_runnable).map({
+    True: "runnable", 
+    False: "not_runnable"
+})
+code_gen_df["score"] = code_gen_df["label"].map({
+    "runnable": 1, 
+    "not_runnable": 0
+})
+```
+
+Unlike the other evaluations, code runnability uses direct Python execution rather than an LLM judge.
 
 ### Environment Helpers
 
 **helper.py Functions**:
 
 ```python
+def load_env():
+    """Load environment variables from .env file"""
+    _ = load_dotenv(find_dotenv(), override=True)
+
 def get_openai_api_key() -> str:
     """Load OpenAI API key from .env or environment"""
-    load_dotenv()
-    return os.getenv("OPENAI_API_KEY")
+    load_env()
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    return openai_api_key
 
 def get_phoenix_endpoint() -> str:
-    """Get Phoenix collector endpoint"""
-    return os.getenv(
-        "PHOENIX_COLLECTOR_ENDPOINT",
-        "http://localhost:6006/v1/traces"
-    )
+    """Get Phoenix collector endpoint from environment"""
+    load_env()
+    phoenix_endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT")
+    return phoenix_endpoint
 ```
+
+**Note**: The `get_phoenix_endpoint()` function returns the raw value from environment (may be `None`). The default endpoint `http://localhost:6006/v1/traces` is set directly in `agent_core.py` and `utils.py` via the `register()` call.
 
 ### SDK Compatibility Notes
 
@@ -1047,7 +1141,7 @@ flowchart TD
 flowchart LR
   subgraph AgentHost
     direction TB
-    Agent[Python Agent (utils.py)]
+    Agent[Python Agent<br/>agent_core.py / utils.py]
     Agent -->|Uses| OpenAI[OpenAI API]
     Agent -->|Queries| DuckDB[DuckDB (in-process SQL)]
     Agent -->|Reads| Parquet[Parquet files (data_analyst/data/)]
@@ -1405,10 +1499,12 @@ python main.py
 
 ```mermaid
 graph LR
-    A[python utils.py] --> B[Run examples]
-    B --> C[Interactive shell]
+    A[python utils.py] --> B[Auto-execute examples]
+    B --> C[Display results]
+    C --> D[Optional: Interactive shell]
     
     style B fill:#fff3e0
+    style C fill:#e8f5e9
 ```
 
 **Commands**:
@@ -1416,23 +1512,31 @@ graph LR
 # Navigate to data_analyst
 cd data_analyst
 
-# Run agent_core.py (note: executes examples on import!)
-python agent_core.py
+# Option 1: Run utils.py (auto-executes examples and demos)
+python utils.py
+# This will:
+# - Execute lookup_sales_data example
+# - Execute analyze_sales_data example  
+# - Execute generate_visualization with matplotlib display
+# - Run full agent example with "Which stores did the best in 2021?"
 
-# Or run interactively:
+# Option 2: Use agent_core.py interactively (no auto-execution)
 python -i agent_core.py
 
 # Then call agent manually:
 >>> messages = [{"role": "user", "content": "What are top 5 products?"}]
->>> response = run_agent(messages)
+>>> response = start_main_span(messages)
 >>> print(response)
 ```
 
-⚠️ **Warning**: Running `agent_core.py` directly executes example queries at import time, which:
+⚠️ **Warning**: Running `utils.py` directly executes example queries at module level, which:
 - Makes OpenAI API calls (costs money)
 - Requires data file to exist
-- Executes `exec()` on generated code
+- Executes `exec()` on generated visualization code
 - Creates spans in Phoenix
+- Displays matplotlib visualizations
+
+✅ **Safe Option**: `agent_core.py` does NOT auto-execute - safe for imports and interactive use
 
 #### Option D: Custom Script
 
@@ -1446,13 +1550,14 @@ notepad run_custom.py
 
 Add to `run_custom.py`:
 ```python
-from agent_core import run_agent
+# Import from agent_core (no auto-execution)
+from agent_core import start_main_span
 
 # Your custom question
 question = "What was the average revenue per transaction in Q4?"
 
 messages = [{"role": "user", "content": question}]
-response = run_agent(messages)
+response = start_main_span(messages)
 
 print("Agent Response:")
 print(response)
@@ -2073,7 +2178,7 @@ If you need to use your own dataset, follow these guidelines:
 **File Format Requirements**:
 - Must be Apache Parquet format
 - Place in `data_analyst/data/` directory
-- Update `TRANSACTION_DATA_FILE_PATH` in `utils.py`
+- Update `TRANSACTION_DATA_FILE_PATH` in both `agent_core.py` and `utils.py`
 
 **Schema Requirements**:
 ```mermaid
@@ -2093,7 +2198,7 @@ graph LR
    - Revenue or calculable revenue
 
 2. **Update SQL Generation Prompt**:
-   In `utils.py`, locate the `generate_sql_query()` function and update the column list:
+   In `agent_core.py` or `utils.py`, locate the `generate_sql_query()` function and update the column list:
    ```python
    prompt = f"""
    Available columns: {', '.join(df.columns)}
@@ -2224,7 +2329,7 @@ Get-Content .env | Select-String PHOENIX
 # PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006/v1/traces
 
 # 2. Check if agent is sending spans
-# Add debug logging in utils.py:
+# Add debug logging in agent_core.py or utils.py:
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -2232,7 +2337,7 @@ logging.basicConfig(level=logging.DEBUG)
 Invoke-WebRequest -Uri http://localhost:6006/v1/traces -Method GET
 
 # 4. Check project name matches
-# In both utils.py and main.py, verify:
+# In agent_core.py, utils.py, and main.py, verify:
 # PROJECT_NAME = "evaluating-agent"
 
 # 5. View Phoenix logs for incoming spans
@@ -2312,7 +2417,7 @@ python -c "from dotenv import load_dotenv; load_dotenv(); import os; print(os.ge
 
 # Error: "The model `gpt-4o-mini` does not exist"
 # - Model name typo or unavailable model
-# Solution: Verify model name in utils.py
+# Solution: Verify model name in agent_core.py or utils.py
 ```
 
 #### Issue 5: Rate Limiting
@@ -2343,7 +2448,7 @@ def call_with_retry(func, max_retries=3, base_delay=1):
             print(f"Rate limited. Retrying in {delay}s...")
             time.sleep(delay)
     
-# Usage in utils.py:
+# Usage in agent_core.py or utils.py:
 response = call_with_retry(
     lambda: client.chat.completions.create(
         model=MODEL,
