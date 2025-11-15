@@ -1,4 +1,4 @@
-# Parquet Pilot - LLM Observability Agent
+# Parquet Pilot: LLM-Driven Retail Data Analyst with Observability
 
 An AI agent for analyzing retail sales data with comprehensive evaluation and observability capabilities. This project demonstrates best practices for building observable LLM applications using OpenAI function calling, Phoenix observability platform, and LLM-as-a-judge evaluation patterns.
 

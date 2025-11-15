@@ -1,4 +1,4 @@
-## Parquet Pilot — Agent for Retail Data Analysis and Observability
+## Parquet Pilot: LLM-Driven Retail Data Analyst with Observability
 
 This document provides a concise, practical, and human-written guide to the Parquet Pilot repository. It explains what the project does, how it is structured, how to run it locally (Windows PowerShell instructions included), and how the observability and evaluation layers work. It also contains Mermaid diagrams that illustrate the runtime flows and architecture.
 
