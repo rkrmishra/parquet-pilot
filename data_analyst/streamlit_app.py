@@ -104,6 +104,51 @@ with st.sidebar:
         st.session_state.conversation_history = []
         st.rerun()
 
+# Sample Data Section - Main Screen
+st.header("📊 Sample Data")
+with st.expander("View Dataset Schema & Sample", expanded=False):
+    st.markdown("""
+    **Dataset:** Store Sales Price Elasticity Promotions Data
+
+    **Available Fields:**
+    """)
+
+    # Load and display sample data
+    try:
+        import pandas as pd
+        from agent_core import TRANSACTION_DATA_FILE_PATH
+
+        df = pd.read_parquet(TRANSACTION_DATA_FILE_PATH)
+
+        st.markdown(f"**Total Records:** {len(df):,}")
+        st.markdown("**Columns:**")
+
+        # Display column information
+        col_info = pd.DataFrame({
+            'Column': df.columns,
+            'Type': df.dtypes.astype(str),
+            'Sample': [str(df[col].iloc[0]) if len(df) > 0 else 'N/A' for col in df.columns]
+        })
+        st.dataframe(col_info, use_container_width=True, hide_index=True)
+
+        st.markdown("**Sample Rows (First 5):**")
+        st.dataframe(df.head(5), use_container_width=True)
+
+        st.markdown("""
+        **Query Ideas:**
+        - Ask about specific stores, products, or dates
+        - Request aggregations (total, average, count)
+        - Compare performance across dimensions
+        - Analyze promotional impact
+        - Visualize trends over time
+        """)
+
+    except Exception as e:
+        st.error(f"Could not load sample data: {str(e)}")
+        st.info("Make sure you're running from the data_analyst directory")
+
+st.divider()
+
 # Main chat interface
 st.header("💬 Chat with the Data Analyst")
 
